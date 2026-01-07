@@ -1,0 +1,6 @@
+.vscode
+__pycache__
+.venv
+server/data
+server/server.log
+server/chatroom-server
