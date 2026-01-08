@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"regexp"
@@ -15,9 +16,51 @@ import (
 )
 
 const (
-	ServerPort    = ":8080"
-	TokenLifetime = 24 * time.Hour
+	defaultBindAddr = ":8080" // listen on all interfaces by default
+	TokenLifetime   = 24 * time.Hour
 )
+
+func getBindAddr() string {
+	if v := os.Getenv("CHATROOM_BIND_ADDR"); v != "" {
+		return v
+	}
+	return defaultBindAddr
+}
+
+func listLANIPs() []string {
+	ips := []string{}
+	ifaces, err := net.Interfaces()
+	if err != nil { return ips }
+	for _, iface := range ifaces {
+		if (iface.Flags & net.FlagUp) == 0 { continue }
+		if (iface.Flags & net.FlagLoopback) != 0 { continue }
+		addrs, err := iface.Addrs()
+		if err != nil { continue }
+		for _, addr := range addrs {
+			var ip net.IP
+			switch v := addr.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			}
+			if ip == nil || ip.IsLoopback() { continue }
+			ip = ip.To4()
+			if ip == nil { continue }
+			ips = append(ips, ip.String())
+		}
+	}
+	return ips
+}
+
+func getPort(addr string) string {
+	if addr == "" { return "8080" }
+	if addr[0] == ':' { return addr[1:] }
+	host, port, err := net.SplitHostPort(addr)
+	_ = host
+	if err != nil || port == "" { return "8080" }
+	return port
+}
 
 var usernameRegex = regexp.MustCompile(`^[a-zA-Z0-9_-]{3,32}$`)
 
@@ -482,7 +525,8 @@ func main() {
 ║  HTTP without encryption - all data transmitted in plain text ║
 ╚═══════════════════════════════════════════════════════════════╝`)
 
-	slog.Info("Starting server", "port", ServerPort, "tokenLifetime", TokenLifetime.String())
+	bindAddr := getBindAddr()
+	slog.Info("Starting server", "bindAddr", bindAddr, "tokenLifetime", TokenLifetime.String())
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", cors(server.handleHealth))
@@ -496,9 +540,17 @@ func main() {
 	mux.HandleFunc("GET /api/metrics", cors(logged(server.handleMetrics)))
 	mux.HandleFunc("GET /api/events", cors(server.handleSSE))
 
-	slog.Info("Server ready", "url", "http://127.0.0.1"+ServerPort)
+	// Helpful connection hints
+	lanIPs := listLANIPs()
+	port := getPort(bindAddr)
+	if len(lanIPs) > 0 {
+		for _, ip := range lanIPs {
+			slog.Info("Accessible on LAN", "url", fmt.Sprintf("http://%s:%s", ip, port))
+		}
+	}
+	slog.Info("Server ready", "url", fmt.Sprintf("http://127.0.0.1:%s", port))
 
-	if err := http.ListenAndServe(ServerPort, mux); err != nil {
+	if err := http.ListenAndServe(bindAddr, mux); err != nil {
 		slog.Error("Server failed", "error", err)
 		os.Exit(1)
 	}

@@ -5,11 +5,13 @@ echo "Starting Go Chatroom Server..."
 echo "========================================"
 echo ""
 
-cd "$(dirname "$0")/go-server" || exit 1
+# Move into the actual server folder
+cd "$(dirname "$0")/server" || { echo "ERROR: server folder not found"; exit 1; }
 
 # If compiled binary exists, use it for faster startup
 if [ -f "chatroom-server" ]; then
     echo "Using compiled binary (instant startup)..."
+    echo "Bind address: ${CHATROOM_BIND_ADDR:-:8080}"
     ./chatroom-server
     exit $?
 fi
@@ -32,5 +34,6 @@ fi
 
 # Run the server
 echo "Starting server from source..."
-echo "TIP: Compile for faster startup: cd go-server && go build -o chatroom-server ."
+echo "Bind address: ${CHATROOM_BIND_ADDR:-:8080}"
+echo "TIP: Compile for faster startup: cd server && go build -o chatroom-server ."
 go run .
